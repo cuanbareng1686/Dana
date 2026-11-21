@@ -3,48 +3,35 @@ import {
   ArrowLeft,
   Check,
   Copy,
-  ExternalLink,
+  Download,
   Eye,
   EyeOff,
-  LogOut,
   Pencil,
-  RefreshCw,
   Search,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import {
   WALLET_PROVIDERS,
   WalletAccount,
   WalletProvider,
 } from '../types/wallet';
-import { SyncedAccountRecord } from '../lib/drive';
 import { ProviderMark } from './ProviderMark';
-import { GoogleSignInButton } from './GoogleSignInButton';
 
 interface AccountListProps {
-  records: SyncedAccountRecord[];
-  folderLink?: string;
-  isConnected: boolean;
-  isLoading: boolean;
-  isSigningIn: boolean;
+  accounts: WalletAccount[];
   onBack: () => void;
-  onSignIn: () => void;
-  onLogout: () => void;
-  onRefresh: () => void;
-  onEdit: (record: SyncedAccountRecord) => void;
-  onDelete: (record: SyncedAccountRecord) => void;
+  onExportCsv: () => void;
+  onImportCsv: () => void;
+  onEdit: (account: WalletAccount) => void;
+  onDelete: (account: WalletAccount) => void;
 }
 
 export const AccountList: React.FC<AccountListProps> = ({
-  records,
-  folderLink,
-  isConnected,
-  isLoading,
-  isSigningIn,
+  accounts,
   onBack,
-  onSignIn,
-  onLogout,
-  onRefresh,
+  onExportCsv,
+  onImportCsv,
   onEdit,
   onDelete,
 }) => {
@@ -69,31 +56,30 @@ export const AccountList: React.FC<AccountListProps> = ({
     let dana = 0;
     let gopay = 0;
     let ovo = 0;
-    for (const r of records) {
-      if (r.account.provider === 'dana') dana++;
-      else if (r.account.provider === 'gopay') gopay++;
-      else if (r.account.provider === 'ovo') ovo++;
+    for (const acc of accounts) {
+      if (acc.provider === 'dana') dana++;
+      else if (acc.provider === 'gopay') gopay++;
+      else if (acc.provider === 'ovo') ovo++;
     }
     return {
       dana,
       gopay,
       ovo,
     };
-  }, [records]);
+  }, [accounts]);
 
   useEffect(() => {
-    if (hasAutoSelectedRef.current || records.length === 0) return;
+    if (hasAutoSelectedRef.current || accounts.length === 0) return;
     hasAutoSelectedRef.current = true;
     if (counts.dana === 0) {
       if (counts.gopay > 0) setFilter('gopay');
       else if (counts.ovo > 0) setFilter('ovo');
     }
-  }, [records.length, counts]);
+  }, [accounts.length, counts]);
 
-  const filteredRecords = useMemo(() => {
+  const filteredAccounts = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return records.filter((rec) => {
-      const acc = rec.account;
+    return accounts.filter((acc) => {
       if (acc.provider !== filter) return false;
       if (!q) return true;
       const providerName = WALLET_PROVIDERS[acc.provider].name.toLowerCase();
@@ -103,7 +89,7 @@ export const AccountList: React.FC<AccountListProps> = ({
         providerName.includes(q)
       );
     });
-  }, [records, filter, searchQuery]);
+  }, [accounts, filter, searchQuery]);
 
   const toggleRevealPin = (id: string) => {
     setRevealedPinIds((prev) => ({
@@ -146,41 +132,27 @@ export const AccountList: React.FC<AccountListProps> = ({
           <span>Kembali</span>
         </button>
 
-        {isConnected && (
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={isLoading}
-              aria-label="Sinkronkan ulang"
-              className="min-h-[40px] min-w-[40px] rounded-full clay-input-field text-[#5e478a] hover:text-[#3a2561] flex items-center justify-center transition-colors disabled:opacity-60"
-            >
-              <RefreshCw
-                className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`}
-              />
-            </button>
-            {folderLink && (
-              <a
-                href={folderLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="Buka folder Google Drive"
-                className="min-h-[40px] px-3 py-1.5 rounded-full clay-input-field text-xs font-semibold text-[#5e478a] hover:text-[#3a2561] inline-flex items-center gap-1.5 whitespace-nowrap"
-              >
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Drive</span>
-              </a>
-            )}
-            <button
-              type="button"
-              onClick={onLogout}
-              aria-label="Keluar dari akun Google"
-              className="min-h-[40px] min-w-[40px] rounded-full clay-input-field text-[#8f6a7d] hover:text-red-600 flex items-center justify-center transition-colors"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onImportCsv}
+            aria-label="Import CSV"
+            className="min-h-[40px] px-3 py-1.5 rounded-full clay-input-field text-xs font-bold text-[#5e478a] hover:text-[#3a2561] inline-flex items-center gap-1.5 transition-colors whitespace-nowrap"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>Import</span>
+          </button>
+          <button
+            type="button"
+            onClick={onExportCsv}
+            disabled={accounts.length === 0}
+            aria-label="Export CSV"
+            className="min-h-[40px] px-3 py-1.5 rounded-full clay-input-field text-xs font-bold text-[#5e478a] hover:text-[#3a2561] inline-flex items-center gap-1.5 transition-colors disabled:opacity-50 whitespace-nowrap"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Export</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter Segmented Control */}
@@ -211,7 +183,7 @@ export const AccountList: React.FC<AccountListProps> = ({
       </div>
 
       {/* Search */}
-      {isConnected && records.length > 0 && (
+      {accounts.length > 0 && (
         <div className="relative flex items-center clay-input-field rounded-full h-[44px] px-3.5">
           <Search className="w-4 h-4 text-[#8f7fa9] shrink-0" />
           <input
@@ -227,39 +199,18 @@ export const AccountList: React.FC<AccountListProps> = ({
 
       {/* Content */}
       <div className="max-h-[55vh] sm:max-h-[400px] overflow-y-auto pr-0.5 space-y-2.5">
-        {!isConnected ? (
-          <div className="py-8 text-center flex flex-col items-center gap-4">
-            <p className="text-sm font-medium text-[#5e4b7e]">
-              Masuk dengan Google untuk melihat akun yang tersimpan di Drive
-            </p>
-            <GoogleSignInButton
-              onClick={onSignIn}
-              disabled={isSigningIn}
-              label={isSigningIn ? 'Menghubungkan...' : 'Masuk dengan Google'}
-            />
-          </div>
-        ) : isLoading && records.length === 0 ? (
-          <div className="space-y-2.5" aria-busy="true">
-            {[1, 2, 3].map((row) => (
-              <div
-                key={row}
-                className="h-[74px] rounded-2xl clay-input-field animate-pulse"
-              />
-            ))}
-          </div>
-        ) : records.length === 0 ? (
+        {accounts.length === 0 ? (
           <div className="py-8 text-center text-sm text-[#7b6a98]">
-            Belum ada akun tersimpan di Google Drive.
+            Belum ada akun tersimpan.
           </div>
-        ) : filteredRecords.length === 0 ? (
+        ) : filteredAccounts.length === 0 ? (
           <div className="py-8 text-center text-sm text-[#7b6a98]">
             {searchQuery.trim()
               ? 'Tidak ditemukan nomor yang cocok.'
               : `Belum ada akun ${WALLET_PROVIDERS[filter].name} tersimpan.`}
           </div>
         ) : (
-          filteredRecords.map((rec) => {
-            const acc: WalletAccount = rec.account;
+          filteredAccounts.map((acc) => {
             const meta = WALLET_PROVIDERS[acc.provider];
             const isPinVisible = Boolean(revealedPinIds[acc.id]);
             const phoneCopyKey = `phone-${acc.id}`;
@@ -279,7 +230,10 @@ export const AccountList: React.FC<AccountListProps> = ({
                       </span>
                       {acc.name && (
                         <>
-                          <span className="text-xs text-[#b7a8d0]" aria-hidden="true">
+                          <span
+                            className="text-xs text-[#b7a8d0]"
+                            aria-hidden="true"
+                          >
                             ·
                           </span>
                           <span className="text-xs font-semibold text-[#46306e] truncate">
@@ -347,7 +301,7 @@ export const AccountList: React.FC<AccountListProps> = ({
                 <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
                   <button
                     type="button"
-                    onClick={() => onEdit(rec)}
+                    onClick={() => onEdit(acc)}
                     aria-label={`Edit ${meta.name} ${acc.phoneNumber}`}
                     className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-full text-[#7c6a98] hover:text-[#4c3494] hover:bg-[#f4ede4] transition-colors"
                   >
@@ -355,7 +309,7 @@ export const AccountList: React.FC<AccountListProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={() => onDelete(rec)}
+                    onClick={() => onDelete(acc)}
                     aria-label={`Hapus ${meta.name} ${acc.phoneNumber}`}
                     className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-full text-[#9c788a] hover:text-red-600 hover:bg-red-50 transition-colors"
                   >

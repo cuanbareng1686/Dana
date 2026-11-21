@@ -25,7 +25,7 @@ export default defineConfig(() => {
           name: 'DompetVault',
           short_name: 'DompetVault',
           description:
-            'Aplikasi penyimpanan akun dompet digital (DANA, GoPay, OVO) yang tersimpan otomatis ke Google Drive.',
+            'Aplikasi penyimpanan akun dompet digital (DANA, GoPay, OVO) secara lokal dengan Export & Import CSV.',
           theme_color: '#C1A8E4',
           background_color: '#C1A8E4',
           display: 'standalone',

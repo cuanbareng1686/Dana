@@ -10,31 +10,11 @@ export interface WalletAccount {
   updatedAt: string;
 }
 
-export interface DriveFileMeta {
-  id: string;
+export interface WalletDraft {
+  provider: WalletProvider;
   name: string;
-  modifiedTime?: string;
-  webViewLink?: string;
-}
-
-export interface VaultPayload {
-  version: number;
-  updatedAt: string;
-  accounts: WalletAccount[];
-}
-
-export type PendingMutationType = 'edit' | 'delete';
-
-export interface PendingDriveMutation {
-  type: PendingMutationType;
-  title: string;
-  description: string;
-  confirmLabel: string;
-  fileName: string;
-  isDestructive?: boolean;
-  targetAccount: WalletAccount;
-  driveFileId: string;
-  isLegacyBulk?: boolean;
+  phoneNumber: string;
+  pin: string;
 }
 
 export const WALLET_PROVIDERS: Record<

@@ -1,28 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { Eye, EyeOff, Loader2, Lock, Smartphone, User } from 'lucide-react';
+import { Eye, EyeOff, Lock, Smartphone, User } from 'lucide-react';
 import {
   WALLET_PROVIDERS,
   WalletAccount,
+  WalletDraft,
   WalletProvider,
 } from '../types/wallet';
 import { ProviderMark } from './ProviderMark';
-import { GoogleSignInButton } from './GoogleSignInButton';
 
 interface WalletFormProps {
   editingAccount: WalletAccount | null;
   savedCount: number;
-  isConnected: boolean;
-  isSaving: boolean;
-  isLoggingIn: boolean;
-  onSubmit: (data: {
-    provider: WalletProvider;
-    name: string;
-    phoneNumber: string;
-    pin: string;
-  }) => Promise<boolean>;
+  onSubmit: (data: WalletDraft) => boolean;
   onCancelEdit: () => void;
   onCheckSaved: () => void;
-  onSignIn: () => void;
 }
 
 const PROVIDER_ORDER: WalletProvider[] = ['dana', 'gopay', 'ovo'];
@@ -30,13 +21,9 @@ const PROVIDER_ORDER: WalletProvider[] = ['dana', 'gopay', 'ovo'];
 export const WalletForm: React.FC<WalletFormProps> = ({
   editingAccount,
   savedCount,
-  isConnected,
-  isSaving,
-  isLoggingIn,
   onSubmit,
   onCancelEdit,
   onCheckSaved,
-  onSignIn,
 }) => {
   const [provider, setProvider] = useState<WalletProvider>('dana');
   const [name, setName] = useState('');
@@ -74,9 +61,8 @@ export const WalletForm: React.FC<WalletFormProps> = ({
     if (errorMsg) setErrorMsg(null);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSaving) return;
 
     const rawDigits = phoneNumber.replace(/\D/g, '');
     if (rawDigits.length < 8 || rawDigits.length > 15) {
@@ -90,7 +76,7 @@ export const WalletForm: React.FC<WalletFormProps> = ({
     }
 
     setErrorMsg(null);
-    const saved = await onSubmit({
+    const saved = onSubmit({
       provider,
       name: name.trim(),
       phoneNumber: phoneNumber.trim(),
@@ -231,17 +217,9 @@ export const WalletForm: React.FC<WalletFormProps> = ({
         <div className="pt-1 flex flex-col gap-2">
           <button
             type="submit"
-            disabled={isSaving}
-            className="w-full min-h-[48px] clay-purple-btn rounded-full text-white text-sm font-bold tracking-wide transition-all inline-flex items-center justify-center gap-2 disabled:opacity-60 whitespace-nowrap"
+            className="w-full min-h-[48px] clay-purple-btn rounded-full text-white text-sm font-bold tracking-wide transition-all inline-flex items-center justify-center gap-2 whitespace-nowrap"
           >
-            {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
-            <span>
-              {isSaving
-                ? 'Menyimpan...'
-                : editingAccount
-                  ? 'Simpan Perubahan'
-                  : 'Simpan'}
-            </span>
+            <span>{editingAccount ? 'Simpan Perubahan' : 'Simpan'}</span>
           </button>
 
           {editingAccount && (
@@ -255,24 +233,6 @@ export const WalletForm: React.FC<WalletFormProps> = ({
           )}
         </div>
 
-        {/* Google Drive Connect (only shown when disconnected) */}
-        {!isConnected && (
-          <div className="pt-1.5 flex flex-col items-center gap-2.5">
-            <div className="w-full flex items-center gap-3">
-              <div className="h-px flex-1 bg-[#e9dfd3]" />
-              <span className="text-[11px] font-medium text-[#9586ae] whitespace-nowrap">
-                Google Drive
-              </span>
-              <div className="h-px flex-1 bg-[#e9dfd3]" />
-            </div>
-            <GoogleSignInButton
-              onClick={onSignIn}
-              disabled={isLoggingIn}
-              label={isLoggingIn ? 'Menghubungkan...' : 'Masuk dengan Google'}
-            />
-          </div>
-        )}
-
         {/* Bottom Action Inside Input Card: Cek yang tersimpan */}
         <div className="pt-2 border-t border-[#efe6da] flex items-center justify-center">
           <button
@@ -281,11 +241,9 @@ export const WalletForm: React.FC<WalletFormProps> = ({
             className="min-h-[44px] px-4 py-2 text-sm font-bold text-[#7c58c4] hover:text-[#5c3aa3] transition-colors inline-flex items-center gap-1.5 whitespace-nowrap"
           >
             <span>Cek yang tersimpan</span>
-            {isConnected && (
-              <span className="font-mono tabular-nums text-xs text-[#9b88bd]">
-                ({savedCount})
-              </span>
-            )}
+            <span className="font-mono tabular-nums text-xs text-[#9b88bd]">
+              ({savedCount})
+            </span>
           </button>
         </div>
       </form>

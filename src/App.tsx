@@ -1,75 +1,42 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { User } from 'firebase/auth';
-import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { AlertCircle, CheckCircle2, X } from 'lucide-react';
 import {
-  clearAccessToken,
-  getAccessToken,
-  googleSignIn,
-  initAuth,
-  logout,
-} from './lib/auth';
-import {
-  createAccountFileInDrive,
-  deleteDriveFile,
-  DriveAuthExpiredError,
-  ensureVaultFolder,
-  syncAllFromDrive,
-  SyncedAccountRecord,
-  updateAccountFileInDrive,
-  updateLegacyVaultFile,
-} from './lib/drive';
-import {
-  DriveFileMeta,
-  PendingDriveMutation,
   WALLET_PROVIDERS,
   WalletAccount,
-  WalletProvider,
+  WalletDraft,
 } from './types/wallet';
+import {
+  generateAccountId,
+  loadLocalAccounts,
+  mergeImportedAccounts,
+  saveLocalAccounts,
+  sortAccountsByUpdated,
+} from './lib/storage';
 import { WalletForm } from './components/WalletForm';
 import { AccountList } from './components/AccountList';
-import { ConfirmDriveModal } from './components/ConfirmDriveModal';
+import { ConfirmDeleteModal } from './components/ConfirmDeleteModal';
+import { CsvModal } from './components/CsvModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
-import { OfflineIndicator } from './components/OfflineIndicator';
-
-interface DraftInput {
-  provider: WalletProvider;
-  name: string;
-  phoneNumber: string;
-  pin: string;
-}
-
-function generateAccountId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return `wlt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-}
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [needsAuth, setNeedsAuth] = useState(true);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-
+  const [accounts, setAccounts] = useState<WalletAccount[]>(() =>
+    loadLocalAccounts()
+  );
   const [view, setView] = useState<'input' | 'saved'>('input');
-  const [records, setRecords] = useState<SyncedAccountRecord[]>([]);
-  const [vaultFolder, setVaultFolder] = useState<DriveFileMeta | null>(null);
-  const [legacyFile, setLegacyFile] = useState<DriveFileMeta | null>(null);
-
-  const [isLoadingDrive, setIsLoadingDrive] = useState(false);
-  const [isSavingDrive, setIsSavingDrive] = useState(false);
-
-  const [editingRecord, setEditingRecord] =
-    useState<SyncedAccountRecord | null>(null);
-  const [pendingMutation, setPendingMutation] =
-    useState<PendingDriveMutation | null>(null);
+  const [editingAccount, setEditingAccount] = useState<WalletAccount | null>(
+    null
+  );
+  const [pendingDelete, setPendingDelete] = useState<WalletAccount | null>(
+    null
+  );
+  const [csvModalMode, setCsvModalMode] = useState<'export' | 'import' | null>(
+    null
+  );
 
   const [toast, setToast] = useState<{
     type: 'success' | 'error';
     text: string;
   } | null>(null);
-
-  const lastSyncRef = useRef<number>(0);
-  const syncInFlightRef = useRef<Promise<unknown> | null>(null);
 
   const showToast = useCallback((type: 'success' | 'error', text: string) => {
     setToast({ type, text });
@@ -77,298 +44,99 @@ export default function App() {
 
   useEffect(() => {
     if (!toast) return;
+    const duration = toast.type === 'error' ? 5000 : 3000;
     const timer = window.setTimeout(() => {
       setToast(null);
-    }, 3200);
+    }, duration);
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const handleDriveError = useCallback(
-    (err: unknown) => {
-      if (err instanceof DriveAuthExpiredError) {
-        clearAccessToken();
-        setNeedsAuth(true);
-        showToast('error', err.message);
-        return;
+  const persistAccounts = useCallback(
+    (next: WalletAccount[]): boolean => {
+      try {
+        saveLocalAccounts(next);
+        setAccounts(next);
+        return true;
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'Gagal menyimpan data di perangkat.';
+        showToast('error', message);
+        return false;
       }
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Gagal terhubung ke Google Drive.';
-      showToast('error', message);
     },
     [showToast]
   );
 
-  const performAutoSync = useCallback(
-    async (token: string, silent = false) => {
-      if (syncInFlightRef.current) {
-        return syncInFlightRef.current;
-      }
+  const handleFormSubmit = (draft: WalletDraft): boolean => {
+    const now = new Date().toISOString();
 
-      const run = (async () => {
-        if (!silent) setIsLoadingDrive(true);
-        try {
-          const result = await syncAllFromDrive(token);
-          setVaultFolder(result.folder);
-          setRecords(result.records);
-          setLegacyFile(result.legacyFile);
-          lastSyncRef.current = Date.now();
-          return result;
-        } catch (err) {
-          if (!silent) handleDriveError(err);
-          return null;
-        } finally {
-          if (!silent) setIsLoadingDrive(false);
-          syncInFlightRef.current = null;
-        }
-      })();
-
-      syncInFlightRef.current = run;
-      return run;
-    },
-    [handleDriveError]
-  );
-
-  useEffect(() => {
-    const unsubscribe = initAuth(
-      async (authedUser, token) => {
-        setUser(authedUser);
-        setNeedsAuth(false);
-        await performAutoSync(token, false);
-      },
-      () => {
-        setNeedsAuth(true);
-      }
-    );
-    return () => unsubscribe();
-  }, [performAutoSync]);
-
-  // Automatic background sync when returning to the app window
-  useEffect(() => {
-    const onFocus = () => {
-      const token = getAccessToken();
-      if (!token || needsAuth) return;
-      if (Date.now() - lastSyncRef.current > 15000) {
-        void performAutoSync(token, true);
-      }
-    };
-    window.addEventListener('focus', onFocus);
-    return () => window.removeEventListener('focus', onFocus);
-  }, [needsAuth, performAutoSync]);
-
-  const handleLogin = async (): Promise<string | null> => {
-    setIsLoggingIn(true);
-    try {
-      const result = await googleSignIn();
-      setUser(result.user);
-      setNeedsAuth(false);
-      await performAutoSync(result.accessToken, false);
-      return result.accessToken;
-    } catch (err) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : 'Gagal masuk dengan Google. Silakan coba lagi.';
-      showToast('error', msg);
-      return null;
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    await logout();
-    setUser(null);
-    setNeedsAuth(true);
-    setRecords([]);
-    setVaultFolder(null);
-    setLegacyFile(null);
-    setEditingRecord(null);
-    setPendingMutation(null);
-    setView('input');
-  };
-
-  const saveNewAccountToDrive = async (
-    token: string,
-    draft: DraftInput
-  ): Promise<boolean> => {
-    setIsSavingDrive(true);
-    try {
-      let folder = vaultFolder;
-      if (!folder) {
-        folder = await ensureVaultFolder(token);
-        setVaultFolder(folder);
-      }
-
-      const now = new Date().toISOString();
-      const newAccount: WalletAccount = {
-        id: generateAccountId(),
-        provider: draft.provider,
-        name: draft.name || undefined,
-        phoneNumber: draft.phoneNumber,
-        pin: draft.pin,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      const createdRecord = await createAccountFileInDrive(
-        token,
-        newAccount,
-        folder.id
+    if (editingAccount) {
+      const updated = sortAccountsByUpdated(
+        accounts.map((acc) =>
+          acc.id === editingAccount.id
+            ? {
+                ...acc,
+                provider: draft.provider,
+                name: draft.name || undefined,
+                phoneNumber: draft.phoneNumber,
+                pin: draft.pin,
+                updatedAt: now,
+              }
+            : acc
+        )
       );
 
-      setRecords((prev) => [createdRecord, ...prev]);
-      lastSyncRef.current = Date.now();
-      showToast(
-        'success',
-        `${WALLET_PROVIDERS[draft.provider].name} tersimpan ke Google Drive`
-      );
+      if (!persistAccounts(updated)) return false;
+      setEditingAccount(null);
+      setView('saved');
+      showToast('success', 'Perubahan akun tersimpan');
       return true;
-    } catch (err) {
-      handleDriveError(err);
-      return false;
-    } finally {
-      setIsSavingDrive(false);
     }
+
+    const newAccount: WalletAccount = {
+      id: generateAccountId(),
+      provider: draft.provider,
+      name: draft.name || undefined,
+      phoneNumber: draft.phoneNumber,
+      pin: draft.pin,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const next = sortAccountsByUpdated([newAccount, ...accounts]);
+    if (!persistAccounts(next)) return false;
+    showToast('success', `${WALLET_PROVIDERS[draft.provider].name} tersimpan`);
+    return true;
   };
 
-  const handleFormSubmit = async (draft: DraftInput): Promise<boolean> => {
-    let token = getAccessToken();
+  const handleConfirmDelete = () => {
+    if (!pendingDelete) return;
+    const next = accounts.filter((acc) => acc.id !== pendingDelete.id);
+    if (!persistAccounts(next)) return;
 
-    if (!token || needsAuth) {
-      token = await handleLogin();
-      if (!token) return false;
+    if (editingAccount?.id === pendingDelete.id) {
+      setEditingAccount(null);
     }
-
-    if (editingRecord) {
-      const now = new Date().toISOString();
-      const updatedAccount: WalletAccount = {
-        ...editingRecord.account,
-        provider: draft.provider,
-        name: draft.name || undefined,
-        phoneNumber: draft.phoneNumber,
-        pin: draft.pin,
-        updatedAt: now,
-      };
-
-      setPendingMutation({
-        type: 'edit',
-        title: 'Perbarui di Google Drive?',
-        description: `Perubahan akun ${WALLET_PROVIDERS[draft.provider].name} akan memperbarui file di Google Drive Anda.`,
-        confirmLabel: 'Simpan',
-        fileName: editingRecord.driveFileName,
-        targetAccount: updatedAccount,
-        driveFileId: editingRecord.driveFileId,
-        isLegacyBulk: editingRecord.isLegacyBulk,
-      });
-      return false;
-    }
-
-    return saveNewAccountToDrive(token, draft);
+    setPendingDelete(null);
+    showToast('success', 'Akun dihapus');
   };
 
-  const handleRequestDelete = (record: SyncedAccountRecord) => {
-    const providerName = WALLET_PROVIDERS[record.account.provider].name;
-    setPendingMutation({
-      type: 'delete',
-      title: 'Hapus dari Google Drive?',
-      description: `Akun ${providerName} (${record.account.phoneNumber}) akan dihapus permanen dari Google Drive Anda.`,
-      confirmLabel: 'Hapus',
-      fileName: record.driveFileName,
-      isDestructive: true,
-      targetAccount: record.account,
-      driveFileId: record.driveFileId,
-      isLegacyBulk: record.isLegacyBulk,
-    });
+  const handleImportCsv = (drafts: WalletDraft[], skipped: number) => {
+    const { merged, added, updated } = mergeImportedAccounts(accounts, drafts);
+    if (!persistAccounts(merged)) return;
+
+    const parts: string[] = [];
+    if (added > 0) parts.push(`${added} ditambah`);
+    if (updated > 0) parts.push(`${updated} diperbarui`);
+    if (skipped > 0) parts.push(`${skipped} dilewati`);
+
+    showToast(
+      'success',
+      parts.length > 0 ? `Import selesai: ${parts.join(', ')}` : 'Import selesai'
+    );
   };
-
-  const handleConfirmMutation = async () => {
-    if (!pendingMutation) return;
-    const token = getAccessToken();
-    if (!token) {
-      setPendingMutation(null);
-      setNeedsAuth(true);
-      showToast('error', 'Sesi berakhir. Silakan masuk Google kembali.');
-      return;
-    }
-
-    setIsSavingDrive(true);
-    try {
-      let updatedFileName = pendingMutation.fileName;
-
-      if (pendingMutation.isLegacyBulk && legacyFile) {
-        const legacyAccounts = records
-          .filter((r) => r.isLegacyBulk)
-          .map((r) => r.account);
-
-        const nextLegacyAccounts =
-          pendingMutation.type === 'delete'
-            ? legacyAccounts.filter(
-                (a) => a.id !== pendingMutation.targetAccount.id
-              )
-            : legacyAccounts.map((a) =>
-                a.id === pendingMutation.targetAccount.id
-                  ? pendingMutation.targetAccount
-                  : a
-              );
-
-        await updateLegacyVaultFile(token, legacyFile.id, nextLegacyAccounts);
-      } else if (pendingMutation.type === 'edit') {
-        const updatedMeta = await updateAccountFileInDrive(
-          token,
-          pendingMutation.driveFileId,
-          pendingMutation.targetAccount
-        );
-        if (updatedMeta.name) updatedFileName = updatedMeta.name;
-      } else if (pendingMutation.type === 'delete') {
-        await deleteDriveFile(token, pendingMutation.driveFileId);
-      }
-
-      lastSyncRef.current = Date.now();
-
-      if (pendingMutation.type === 'edit') {
-        setRecords((prev) =>
-          prev.map((rec) =>
-            rec.account.id === pendingMutation.targetAccount.id
-              ? {
-                  ...rec,
-                  account: pendingMutation.targetAccount,
-                  driveFileName: updatedFileName,
-                }
-              : rec
-          )
-        );
-        setEditingRecord(null);
-        setView('saved');
-        showToast('success', 'Perubahan tersimpan ke Google Drive');
-      } else {
-        setRecords((prev) =>
-          prev.filter((rec) => rec.account.id !== pendingMutation.targetAccount.id)
-        );
-        if (editingRecord?.account.id === pendingMutation.targetAccount.id) {
-          setEditingRecord(null);
-        }
-        showToast('success', 'Akun dihapus dari Google Drive');
-      }
-
-      setPendingMutation(null);
-    } catch (err) {
-      handleDriveError(err);
-    } finally {
-      setIsSavingDrive(false);
-    }
-  };
-
-  const handleCheckSaved = () => {
-    setView('saved');
-    const token = getAccessToken();
-    if (token && !needsAuth) {
-      void performAutoSync(token, false);
-    }
-  };
-
-  const isConnected = !needsAuth && Boolean(user);
 
   return (
     <div className="min-h-dvh w-full lavender-canvas flex items-center justify-center p-3.5 sm:p-6 relative overflow-x-hidden">
@@ -388,60 +156,54 @@ export default function App() {
         {toast && (
           <div
             role={toast.type === 'error' ? 'alert' : 'status'}
-            className={`mb-3 px-4 py-2.5 rounded-full text-xs font-semibold flex items-center justify-center gap-2 shadow-sm ${
+            className={`mb-3 px-4 py-2.5 rounded-2xl text-xs font-semibold flex items-start justify-between gap-2.5 shadow-sm leading-snug ${
               toast.type === 'error'
                 ? 'bg-red-50 text-red-700 border border-red-200'
                 : 'bg-[#fdf9f3] text-[#46306e] border border-[#e7dccf]'
             }`}
           >
-            {toast.type === 'error' ? (
-              <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
-            ) : (
-              <CheckCircle2 className="w-4 h-4 shrink-0 text-[#8e69d3]" />
-            )}
-            <span className="truncate">{toast.text}</span>
+            <div className="flex items-start gap-2 min-w-0">
+              {toast.type === 'error' ? (
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-500 mt-0.5" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-[#8e69d3] mt-0.5" />
+              )}
+              <span className="break-words">{toast.text}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              aria-label="Tutup notifikasi"
+              className="shrink-0 p-0.5 rounded-full opacity-70 hover:opacity-100 transition-opacity"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </div>
         )}
 
         <div className="clay-shell rounded-[32px] sm:rounded-[36px] p-3 sm:p-4">
           {view === 'input' ? (
             <WalletForm
-              editingAccount={editingRecord?.account ?? null}
-              savedCount={records.length}
-              isConnected={isConnected}
-              isSaving={isSavingDrive || isLoggingIn}
-              isLoggingIn={isLoggingIn}
+              editingAccount={editingAccount}
+              savedCount={accounts.length}
               onSubmit={handleFormSubmit}
               onCancelEdit={() => {
-                setEditingRecord(null);
+                setEditingAccount(null);
                 setView('saved');
               }}
-              onCheckSaved={handleCheckSaved}
-              onSignIn={() => {
-                void handleLogin();
-              }}
+              onCheckSaved={() => setView('saved')}
             />
           ) : (
             <AccountList
-              records={records}
-              folderLink={vaultFolder?.webViewLink}
-              isConnected={isConnected}
-              isLoading={isLoadingDrive}
-              isSigningIn={isLoggingIn}
+              accounts={accounts}
               onBack={() => setView('input')}
-              onSignIn={() => {
-                void handleLogin();
-              }}
-              onLogout={handleLogout}
-              onRefresh={() => {
-                const token = getAccessToken();
-                if (token) void performAutoSync(token, false);
-              }}
-              onEdit={(rec) => {
-                setEditingRecord(rec);
+              onExportCsv={() => setCsvModalMode('export')}
+              onImportCsv={() => setCsvModalMode('import')}
+              onEdit={(acc) => {
+                setEditingAccount(acc);
                 setView('input');
               }}
-              onDelete={handleRequestDelete}
+              onDelete={(acc) => setPendingDelete(acc)}
             />
           )}
         </div>
@@ -451,13 +213,18 @@ export default function App() {
         </div>
       </main>
 
-      <OfflineIndicator />
+      <ConfirmDeleteModal
+        account={pendingDelete}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
 
-      <ConfirmDriveModal
-        mutation={pendingMutation}
-        isSubmitting={isSavingDrive}
-        onConfirm={handleConfirmMutation}
-        onCancel={() => !isSavingDrive && setPendingMutation(null)}
+      <CsvModal
+        mode={csvModalMode}
+        accounts={accounts}
+        onClose={() => setCsvModalMode(null)}
+        onImport={handleImportCsv}
+        onNotify={showToast}
       />
     </div>
   );
