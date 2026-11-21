@@ -1,0 +1,6 @@
+{
+  "name": "DompetVault — Simpan Akun Dompet ke Google Drive",
+  "description": "Aplikasi penyimpanan akun dompet digital (DANA, GoPay, OVO) yang tersimpan otomatis dan aman ke Google Drive Anda.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
