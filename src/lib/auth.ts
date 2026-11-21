@@ -43,6 +43,15 @@ export const googleSignIn = async (): Promise<{
   user: User;
   accessToken: string;
 }> => {
+  const win = window as unknown as {
+    Capacitor?: { isNativePlatform?: () => boolean };
+  };
+  if (win.Capacitor?.isNativePlatform?.()) {
+    throw new Error(
+      'Login Google tidak didukung di dalam WebView APK. Buka versi web di Chrome lalu pilih Install Aplikasi.'
+    );
+  }
+
   try {
     isSigningIn = true;
     const result = await signInWithPopup(auth, provider);
