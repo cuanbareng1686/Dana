@@ -1,0 +1,73 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: TypeScript check
+        run: npm run lint
+
+      - name: Build web assets
+        env:
+          VITE_BASE_PATH: ./
+        run: npm run build
+
+      - name: Install Capacitor Android
+        run: npm install --no-save --legacy-peer-deps --no-audit --no-fund @capacitor/core@8 @capacitor/cli@8 @capacitor/android@8
+
+      - name: Generate Android project & sync
+        run: |
+          rm -rf android
+          npx cap add android
+          rm -rf android/app/src/main/res/mipmap-anydpi-v26
+          for dir in android/app/src/main/res/mipmap-*; do
+            if [ -d "$dir" ]; then
+              cp -f public/pwa-192x192.png "$dir/ic_launcher.png"
+              cp -f public/pwa-192x192.png "$dir/ic_launcher_round.png"
+            fi
+          done
+          if [ -d android/app/src/main/res/mipmap-xxxhdpi ]; then
+            cp -f public/pwa-512x512.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+            cp -f public/pwa-512x512.png android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
+          fi
+          npx cap sync android
+
+      - name: Build Debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+          cp app/build/outputs/apk/debug/app-debug.apk ../DompetVault-debug.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DompetVault-APK
+          path: DompetVault-debug.apk
+          retention-days: 30
